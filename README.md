@@ -14,3 +14,12 @@ SAC Algorithm\
 - Optimize Soft Q-Function ![OptimizeSoftQ-Function](figures/Optimize_Soft_Q_Function.png)
 - Objective Gradient ![ObjectiveGradient](figures/ObjectiveGradient.png)
 
+### TestTask
+- Pendulum-v1
+- MountainCarContinuous-v0
+
+### Milestone
+1. Environment
+2. Agent
+3. Trainer 
+
