@@ -3,8 +3,6 @@ import torch.optim as optim
 from model import Actor, Critic
 from memory import ReplayMemory
 
-from const import *
-
 
 class SAC(object):
     def __init__(self, env, writer=None):
@@ -19,7 +17,8 @@ class SAC(object):
         self.actor = Actor(state_dim, action_dim).to('cuda')
         self.critic = Critic(state_dim, action_dim).to('cuda')
         self.target_critic = Critic(state_dim, action_dim).to('cuda')
-        self.target_critic.load_state_dict(self.critic.state_dict()).eval()
+        self.target_critic.load_state_dict(self.critic.state_dict())
+        self.target_critic.eval()
         # Invalid gradient
         for param in self.target_critic.parameters():
             param.requires_grad = False
@@ -30,18 +29,23 @@ class SAC(object):
         # Parameters
         self.gamma = 0.99
         self.tau = 0.005
-        self.hard_target_update_interval = 10000
-        self.hard_target_update_gradient_step = 4
         self.alpha = 0.2  # temperature parameter
         self.reward_scale = 1.0
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=weight_decay)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
 
     def get_action(self, state):
+        state = torch.tensor(state, dtype=torch.float, device='cuda').unsqueeze_(0)
         with torch.no_grad():
-            action, log_pi = self.actor.reparameterize(torch.from_numpy(state).float().to('cuda'))
-        return action.detach().cpu().numpy(), log_pi.item()
+            action, log_pi = self.actor.reparameterize(state)
+        return action.cpu().numpy()[0], log_pi.item()
+
+    def exploit(self, state):
+        state = torch.tensor(state, dtype=torch.float, device='cuda').unsqueeze_(0)
+        with torch.no_grad():
+            action = self.actor(state)
+        return action.cpu().numpy()[0]
 
     def store_transition(self, state, action, state_, reward, done):
         self.memory.store_transition(state, action, state_, reward, done)
@@ -51,23 +55,24 @@ class SAC(object):
             t.data.mul_(1.0 - self.tau)
             t.data.add_(self.tau * s.data)
 
-    def update(self, batch_size=256):
+    def update(self, timesteps, batch_size=256):
         states, actions, states_, rewards, terminals = self.memory.sample(batch_size)
 
-        self.update_critic(states, actions, rewards, terminals, states_)
-        self.update_actor(states)
+        critic_loss = self.update_critic(states, actions, states_, rewards, terminals)
+        actor_loss = self.update_actor(states)
         self.update_target()
+        if timesteps % 100 == 0 and self.writer is not None:
+            self.writer.add_scalar("Loss/Critic", critic_loss, timesteps)
+            self.writer.add_scalar("Loss/Actor", actor_loss, timesteps)
 
-        del states, actions, states_, rewards, terminals
-
-    def update_critic(self, states, actions, rewards, dones, next_states):
+    def update_critic(self, states, actions, states_, rewards, terminals):
         current_q1, current_q2 = self.critic(states, actions)
 
         with torch.no_grad():
-            next_actions, log_pis = self.actor.reparameterize(next_states)
-            next_q1, next_q2 = self.target_critic(next_states, next_actions)
+            next_actions, log_pis = self.actor.reparameterize(states_)
+            next_q1, next_q2 = self.target_critic(states_, next_actions)
             next_q = torch.min(next_q1, next_q2) - self.alpha + log_pis
-        target_q = rewards * self.reward_scale + (1.0 - dones) * self.gamma * next_q
+        target_q = rewards * self.reward_scale + terminals * self.gamma * next_q
 
         loss_critic1 = (current_q1 - target_q).pow_(2).mean()
         loss_critic2 = (current_q2 - target_q).pow_(2).mean()
@@ -75,18 +80,34 @@ class SAC(object):
 
         self.critic_optimizer.zero_grad()
         loss_critic.backward(retain_graph=False)
-        del loss_critic, loss_critic1, loss_critic2, target_q, current_q1, current_q2
         self.critic_optimizer.step()
+
+        return loss_critic.item()
 
     def update_actor(self, states):
         actions, log_pis = self.actor.reparameterize(states)
-        q1, q2 = self.critic(states, actions)
-        loss_actor = (self.alpha * log_pis - torch.min(q1, q2)).mean()
+        q = torch.min(*self.critic(states, actions))
+        loss_actor = (self.alpha * log_pis - q).mean()
 
         self.actor_optimizer.zero_grad()
         loss_actor.backward(retain_graph=False)
-        del loss_actor, q1, q2, actions, log_pis
         self.actor_optimizer.step()
+
+        return loss_actor.item()
+
+    def evaluate(self, evaluate_env, times=10):
+        episode_returns = []
+        for _ in range(times):
+            state = evaluate_env.reset()
+            done = False
+            episode_return = 0.0
+
+            while not done:
+                action = self.exploit(state)
+                state, reward, done, _ = evaluate_env.step(action)
+                episode_return += reward
+            episode_returns.append(episode_return)
+        return sum(episode_returns) / times
 
     def save_model(self, path='models/'):
         torch.save(self.actor.state_dict(), path + 'actor')
