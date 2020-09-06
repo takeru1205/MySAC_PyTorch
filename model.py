@@ -13,16 +13,17 @@ class Actor(nn.Module):
         self.fc3 = nn.Linear(256, 2 * action_dim)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x), inplace=True)
+        x = F.relu(self.fc2(x), inplace=True)
         x = self.fc3(x).chunk(2, dim=-1)[0]
         x = torch.tanh(x)
         return x
 
     def reparameterize(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        means, log_stds = self.fc3(x).chunk(2, dim=-1)
+        x = F.relu(self.fc1(x), inplace=True)
+        x = F.relu(self.fc2(x), inplace=True)
+        x = self.fc3(x)
+        means, log_stds = x.chunk(2, dim=-1)
         return reparameterize(means, log_stds.clamp_(-20, 2))
 
 
@@ -38,11 +39,11 @@ class Critic(nn.Module):
         self.fc6 = nn.Linear(256, 1)
 
     def forward(self, x, a):
-        q1 = F.relu(self.fc1(torch.cat([x, a], dim=1)))
-        q1 = F.relu(self.fc2(q1))
+        q1 = F.relu(self.fc1(torch.cat([x, a], dim=1)), inplace=True)
+        q1 = F.relu(self.fc2(q1), inplace=True)
         q1 = self.fc3(q1)
 
-        q2 = F.relu(self.fc4(torch.cat([x, a], dim=1)))
-        q2 = F.relu(self.fc5(q2))
+        q2 = F.relu(self.fc4(torch.cat([x, a], dim=1)), inplace=True)
+        q2 = F.relu(self.fc5(q2), inplace=True)
         q2 = self.fc6(q2)
         return q1, q2
