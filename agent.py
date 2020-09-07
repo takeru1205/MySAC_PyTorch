@@ -5,7 +5,7 @@ from memory import ReplayMemory
 
 
 class SAC(object):
-    def __init__(self, env, writer=None):
+    def __init__(self, env, writer=None, entropy_tune=True):
         self.env = env
         self.writer = writer
 
@@ -29,8 +29,20 @@ class SAC(object):
         # Parameters
         self.gamma = 0.99
         self.tau = 0.005
-        self.alpha = 0.2  # temperature parameter
         self.reward_scale = 1.0
+
+        # Entropy Tune
+        self.entropy_tune = entropy_tune
+        if entropy_tune:
+            self.target_entropy = -torch.prod(
+                torch.Tensor(env.action_space.shape).to('cuda')
+            ).item()
+            self.log_alpha = torch.zeros(
+                1, requires_grad=True, device='cuda')
+            self.alpha = self.log_alpha.exp()
+            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
+        else:
+            self.alpha = 0.2
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
@@ -59,11 +71,15 @@ class SAC(object):
         states, actions, states_, rewards, terminals = self.memory.sample(batch_size)
 
         critic_loss = self.update_critic(states, actions, states_, rewards, terminals)
-        actor_loss = self.update_actor(states)
+        actor_loss, entropy, entropy_loss = self.update_actor(states)
         self.update_target()
-        if timesteps % 100 == 0 and self.writer is not None:
+
+        # tensorboard
+        if timesteps % 100 == 0 and self.writer:
             self.writer.add_scalar("Loss/Critic", critic_loss, timesteps)
             self.writer.add_scalar("Loss/Actor", actor_loss, timesteps)
+            if self.entropy_tune:
+                self.writer.add_scalar("Loss/Entropy", entropy_loss, timesteps)
 
     def update_critic(self, states, actions, states_, rewards, terminals):
         current_q1, current_q2 = self.critic(states, actions)
@@ -87,13 +103,25 @@ class SAC(object):
     def update_actor(self, states):
         actions, log_pis = self.actor.reparameterize(states)
         q = torch.min(*self.critic(states, actions))
+        loss_entropy = 0
+
+        # entropy tuning
+        if self.entropy_tune:
+            loss_entropy = -(self.log_alpha * (log_pis + self.target_entropy).detach()).mean()
+            self.alpha = self.log_alpha.exp()
+
         loss_actor = (self.alpha * log_pis - q).mean()
 
         self.actor_optimizer.zero_grad()
         loss_actor.backward(retain_graph=False)
         self.actor_optimizer.step()
 
-        return loss_actor.item()
+        if self.entropy_tune:
+            self.alpha_optimizer.zero_grad()
+            loss_entropy.backward(retain_graph=False)
+            self.alpha_optimizer.step()
+
+        return loss_actor.item(), log_pis, loss_entropy.item()
 
     def evaluate(self, evaluate_env, times=10):
         episode_returns = []
