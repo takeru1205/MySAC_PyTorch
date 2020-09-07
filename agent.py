@@ -132,7 +132,7 @@ class SAC(object):
 
             while not done:
                 action = self.exploit(state)
-                state, reward, done, _ = evaluate_env.step(action)
+                state, reward, done, _ = evaluate_env.step(action * self.max_action)
                 episode_return += reward
             episode_returns.append(episode_return)
         return sum(episode_returns) / times
