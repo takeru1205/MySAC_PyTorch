@@ -15,11 +15,12 @@ epoch = 5 * 10 ** 4
 writer = SummaryWriter(log_dir='./logs/{}'.format(ENV_ID))
 
 # seed
-np.random.seed(42)
-env.seed(42)
-evaluate_env.seed(1234)
-torch.manual_seed(42)
-torch.cuda.manual_seed(42)
+SEED = 0
+np.random.seed(SEED)
+env.seed(SEED)
+evaluate_env.seed(2**31)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
 
 agent = SAC(env, writer)
 
@@ -47,14 +48,21 @@ for e in range(epoch):
         state = state_
         cumulative_reward += reward
 
-        if all_timesteps > max(start_steps, int(1e+4)):
+        if all_timesteps > start_steps:
             agent.update(all_timesteps)
         all_timesteps += 1
         if done:
             break
     if e % evaluate_epoch == 0:
         evaluate_reward = agent.evaluate(evaluate_env)
-        print('Epoch : {} / {}, Means of Evaluate Reward : {}'.format(e, epoch, evaluate_reward))
+        print('Epoch : {} / {}, Train Time Steps : {}, Means of Evaluate Reward : {}'.format(
+            e, epoch, all_timesteps, evaluate_reward))
         writer.add_scalar("Reward/Evaluate", evaluate_reward, e)
     writer.add_scalar('Reward/Train', cumulative_reward, e)
-    # print('Epoch : {} / {}, Episode Steps: {}, Cumulative Reward : {}'.format(e, epoch, i, cumulative_reward))
+
+evaluate_reward = agent.evaluate(evaluate_env)
+print('Epoch : {} / {}, Means of Evaluate Reward : {}'.format(epoch, epoch, evaluate_reward))
+writer.add_scalar("Reward/Evaluate", evaluate_reward, epoch)
+
+env.close()
+evaluate_env.close()
