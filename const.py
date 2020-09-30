@@ -1,4 +1,6 @@
 actor_lr = 3e-4
 critic_lr = 3e-4
-value_lr = 3e-4
-weight_decay = 1e-2
+alpha = 0.2
+gamma = 0.99
+tau = 0.005
+batch_size = 256

@@ -1,44 +1,37 @@
-# Replay Memory
-import torch
 import numpy as np
+import torch
 
 
-class ReplayMemory(object):
-    """
-    Replay Memory for Experience Replay.
-    Data sampling randomly from buffer.
-    """
-
-    def __init__(self, state_dim, act_dim, max_size=int(1e+6)):
+class ReplayMemory:
+    def __init__(self, state_dim, action_dim, device='cuda', max_size=int(1e+6)):
         self.max_size = max_size
-        self.state_memory = torch.zeros((self.max_size, state_dim), dtype=torch.float, device='cuda')
-        self.new_state_memory = torch.zeros((self.max_size, state_dim), dtype=torch.float, device='cuda')
-        self.action_memory = torch.zeros((self.max_size, act_dim), dtype=torch.float, device='cuda')
-        self.reward_memory = torch.zeros(self.max_size, dtype=torch.float, device='cuda')
-        self.terminal_memory = torch.zeros(self.max_size, dtype=torch.uint8, device='cuda')
+        self.state_memory = torch.zeros((self.max_size, state_dim), dtype=torch.float, device=device)
+        self.action_memory = torch.zeros((self.max_size, action_dim), dtype=torch.float, device=device)
+        self.next_state_memory = torch.zeros((self.max_size, state_dim), dtype=torch.float, device=device)
+        self.reward_memory = torch.zeros(self.max_size, dtype=torch.float, device=device)
+        self.terminal_memory = torch.zeros(self.max_size, dtype=torch.uint8, device=device)
         self.mem_ctrl = 0
 
-    def store_transition(self, state, action, state_, reward, done):
+    def store_transition(self, state, action, next_state, reward, done):
         index = self.mem_ctrl % self.max_size
         self.state_memory[index] = torch.from_numpy(state)
-        self.action_memory[index] = torch.tensor(action)
-        self.new_state_memory[index] = torch.from_numpy(state_)
+        self.action_memory[index] = torch.from_numpy(action)
+        self.next_state_memory[index] = torch.from_numpy(next_state)
         self.reward_memory[index] = torch.from_numpy(np.array([reward]).astype(np.float))
         self.terminal_memory[index] = torch.from_numpy(np.array([1 - done]).astype(np.uint8))
         self.mem_ctrl += 1
 
     def sample(self, batch_size=256):
         mem_size = min(self.mem_ctrl, self.max_size)
-        batch = np.random.choice(mem_size, batch_size)
+        batch_idx = np.random.choice(mem_size, batch_size)
 
-        states = self.state_memory[batch]
-        actions = self.action_memory[batch]
-        rewards = self.reward_memory[batch]
-        states_ = self.new_state_memory[batch]
-        terminal = self.terminal_memory[batch]
+        states = self.state_memory[batch_idx]
+        actions = self.action_memory[batch_idx]
+        next_states = self.next_state_memory[batch_idx]
+        rewards = self.reward_memory[batch_idx]
+        terminals = self.terminal_memory[batch_idx]
 
-        # return states.to('cuda'), actions.to('cuda'), states_.to('cuda'), rewards.to('cuda'), terminal.to('cuda')
-        return states, actions, states_, rewards, terminal
+        return states, actions, next_states, rewards, terminals
 
     def __len__(self):
         return self.mem_ctrl
