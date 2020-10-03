@@ -1,17 +1,20 @@
+import numpy as np
 import torch
 import torch.optim as optim
 from model import Actor, Critic
 from memory import ReplayMemory
 
-from const import *
-
 
 class SAC:
-    def __init__(self, env, alpha=0.2, gamma=0.99, tau=0.005, reward_scale=1.0, entropy_tune=True, writer=None):
+    def __init__(self, env, alpha=0.2, gamma=0.99, tau=0.005, lr=3e-4, reward_scale=1.0, entropy_tune=True, writer=None):
         self.env = env
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = env.action_space.shape[0]
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Seed
+        np.random.seed(0)
+        torch.manual_seed(0)
 
         # models
         self.actor = Actor(self.state_dim, self.action_dim).to(self.device)
@@ -24,8 +27,8 @@ class SAC:
             param.requires_grad = False
 
         # Optimizer
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr)
 
         # Replay Memory
         self.memory = ReplayMemory(self.state_dim, self.action_dim)
@@ -41,10 +44,9 @@ class SAC:
             self.target_entropy = -torch.prod(
                 torch.Tensor(self.env.action_space.shape).to('cuda')
             ).item()
-            self.log_alpha = torch.zeros(
-                1, requires_grad=True, device='cuda')
+            self.log_alpha = torch.tensor([0.2], requires_grad=True, device='cuda')
             self.alpha = self.log_alpha.exp()
-            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
+            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr)
         else:
             self.alpha = alpha
 
@@ -111,8 +113,9 @@ class SAC:
             self.alpha_optimizer.zero_grad()
             loss_entropy.backward(retain_graph=False)
             self.alpha_optimizer.step()
+            return loss_actor.item(), loss_entropy.item()
 
-        return loss_actor.item(), loss_entropy.item()
+        return loss_actor.item(), loss_entropy
 
     def update_target(self):
         for t, s in zip(self.critic_target.parameters(), self.critic.parameters()):
