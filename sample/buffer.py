@@ -1,13 +1,11 @@
 import random
 from collections import namedtuple
 
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
+Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'terminal'))
 
 
 class ReplayMemory(object):
-
-    def __init__(self, capacity):
+    def __init__(self, capacity=int(1e+6)):
         self.capacity = capacity
         self.memory = []
         self.position = 0
