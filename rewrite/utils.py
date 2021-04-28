@@ -1,11 +1,32 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import math
+import torch
 
 
-def plot_learning_curve(x, scores, figure_file):
-    running_avg = np.zeros(len(scores))
-    for i in range(len(running_avg)):
-        running_avg[i] = np.mean(scores[max(0, i-100):(i+1)])
-    plt.plot(x, running_avg)
-    plt.title('Running average of previous 100 scores')
-    plt.savefig(figure_file)
+def calculate_log_pi(log_stds, noises, actions):
+    """ 確率論的な行動の確率密度を返す． """
+    # ガウス分布 `N(0, stds * I)` における `noises * stds` の確率密度の対数(= \log \pi(u|a))を計算する．
+    # (torch.distributions.Normalを使うと無駄な計算が生じるので，下記では直接計算しています．)
+    gaussian_log_probs = \
+        (-0.5 * noises.pow(2) - log_stds).sum(dim=-1, keepdim=True) - 0.5 * math.log(2 * math.pi) * log_stds.size(-1)
+
+    # tanh による確率密度の変化を修正する．
+    log_pis = gaussian_log_probs - torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+
+    return log_pis
+
+
+def reparameterize(means, log_stds):
+    """ Reparameterization Trickを用いて，確率論的な行動とその確率密度を返す． """
+    # 標準偏差．
+    stds = log_stds.exp()
+    # 標準ガウス分布から，ノイズをサンプリングする．
+    noises = torch.randn_like(means)
+    # Reparameterization Trickを用いて，N(means, stds)からのサンプルを計算する．
+    us = means + noises * stds
+    # tanh　を適用し，確率論的な行動を計算する．
+    actions = torch.tanh(us)
+
+    # 確率論的な行動の確率密度の対数を計算する．
+    log_pis = calculate_log_pi(log_stds, noises, actions)
+
+    return actions, log_pis
